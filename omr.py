@@ -108,46 +108,40 @@ def fix_page_orientation(page_img):
     # 1. Pre-processing for Thick Line Isolation
     img = cv.cvtColor(page_img, cv.COLOR_BGR2GRAY)
 
-    # Invert the image, so the black lines become white. Morphological
-    # operations in OpenCV typically work on white features.
-    #
+    sharpening_kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+    img = cv.filter2D(img, -1, sharpening_kernel)
 
     _, img = cv.threshold(img, 100, 255, cv.THRESH_BINARY_INV)
 
-    # Define a kernel for erosion. A larger kernel (e.g., (5,5)) will
-    # remove more noise and thinner lines.
-    kernel = np.ones((3, 3), np.uint8)
+    # Erode the image to remove noise and thin lines
+    erosion_kernel = np.ones((5, 5), np.uint8)
+    img = cv.erode(img, erosion_kernel, iterations=1)
+    show_image(img)
 
-    # Erode the image. This will shrink the white features. Thick lines
-    # will become thinner, while thin lines will disappear.
-    img = cv.erode(img, kernel, iterations=1)
+    # Find contours instead of using Canny edge detection
+    contours, _ = cv.findContours(img, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
-    # Use the Canny edge detector on the eroded image to find the
-    # boundaries of the remaining (originally thick) lines.
-    edges = cv.Canny(img, 50, 150, apertureSize=3)
-    print(edges.shape)
+    lines_list = []
+    min_line_length = int(w * 0.80)
+    for contour in contours:
+        x_c, y_c, w_c, h_c = cv.boundingRect(contour)
+        if w_c > min_line_length and h_c < 50:  # Filter for long, horizontal contours
+            # Fit a line to the contour points
+            [vx, vy, x, y] = cv.fitLine(contour, cv.DIST_L2, 0, 0.01, 0.01)
+            # Extrapolate the line to the image boundaries
+            lefty = int((-x * vy / vx) + y)
+            righty = int(((w - x) * vy / vx) + y)
+            lines_list.append([[0, lefty, w - 1, righty]])
 
-    # 2. Line Detection with Dynamic Parameters
-    # Set the minimum line length to be 70% of the image's width.
-    # This ensures we only detect the long guide lines.
-    min_line_length = int(w * 0.50)
-
-    lines = cv.HoughLinesP(
-        edges,
-        rho=1,
-        theta=np.pi / 180,
-        threshold=10,  # Lower threshold can be used as we've filtered heavily
-        minLineLength=min_line_length,
-        maxLineGap=25,  # Increased gap to account for breaks from erosion
-    )
-
-    if lines is None:
+    if not lines_list:
         print("No dominant long lines were detected. Returning original image.")
         return page_img
+    lines = np.array(lines_list)
 
     for line in lines:
         x1, y1, x2, y2 = line[0]
         cv.line(page_img, (x1, y1), (x2, y2), BGR_BLUE, 2)
+    show_image(page_img)
 
     # 3. Angle Calculation (same as before)
     angles = []
@@ -170,15 +164,16 @@ def fix_page_orientation(page_img):
         borderMode=cv.BORDER_REPLICATE,
     )
 
-    top = min(lines, key = lambda l: l[0][1])[0][1]
-    bottom = max(lines, key = lambda l: l[0][1])[0][1]
+    top = min(lines, key=lambda l: l[0][1])[0][1]
+    bottom = max(lines, key=lambda l: l[0][1])[0][1]
     print(top, bottom)
-    cropped_image = rotated_image[top:top+bottom, :]
+    cropped_image = rotated_image[top : top + bottom, :]
+    show_image(cropped_image)
 
     return cropped_image
 
 
-def detect_triangles(img, min_area=DPI+50):
+def detect_triangles(img, min_area=DPI + 50):
     img = preprocess_image_for_detection(img, 1)
     contours, hierarchy = cv.findContours(img, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
     all_triangles = []
@@ -379,8 +374,6 @@ def mark_file(attempt_file, answer_file):
     )
     score_str = f"Score: {final_score}/{len(answers)}"
     first_page = next(attempt_file.pages())
-    first_page.insert_text(
-        (20, 20), score_str, fontsize=24
-    )
+    first_page.insert_text((20, 20), score_str, fontsize=24)
     print(score_str)
     return attempt_file.tobytes()
