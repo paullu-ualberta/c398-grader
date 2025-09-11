@@ -15,7 +15,6 @@ PDF_GREEN = (0.0, 1.0, 0.0)
 
 DPI = 200
 TRIANGLE_MIN_AREA = DPI
-NUM_OPTIONS = 6
 
 
 @dataclass
@@ -142,16 +141,28 @@ class GuideMark:
         return GuideMark(x=pdf_x, y=pdf_y, width=pdf_w, height=pdf_h)
 
 
+def detect_horizontal_and_vertical_guides(all_guides, tolerance=10):
+    # Since there are always going to be more questions than options
+    # first we figure out the x coordinate of the horizontal guides
+    assert len(all_guides) > 2
+    horizontal_guide_x = sorted([guide.x for guide in all_guides])[len(all_guides) // 2]
+    horizontal_guides = []
+    vertical_guides = []
+    for guide in all_guides:
+        if abs(guide.x - horizontal_guide_x) < tolerance:
+            horizontal_guides.append(guide)
+        else:
+            vertical_guides.append(guide)
+    return vertical_guides, horizontal_guides
+
+
 class GuideMatrix:
     def __init__(self, guide_points: list[GuideMark], tolerance=20):
-        guide_points = sorted(guide_points, key=lambda g: g.y)
-
-        # The vertical ones must be closest to the top.
-        vertical_guides = guide_points[:NUM_OPTIONS]
-        horizontal_guides = guide_points[NUM_OPTIONS:]
-        self.vertical_guides = vertical_guides
+        v_guides, h_guides = detect_horizontal_and_vertical_guides(guide_points)
+        print(f"Detected a grid {len(v_guides)}x{len(h_guides)} grid")
+        self.vertical_guides = v_guides
         self.vertical_guides.sort(key=lambda g: g.x)
-        self.horizontal_guides = horizontal_guides
+        self.horizontal_guides = h_guides
         self.tolerance = tolerance
 
     def cells_centers(self):
