@@ -6,12 +6,14 @@ from dataclasses import dataclass
 from bisect import bisect_left
 import logging
 from itertools import chain
+from pprint import pprint as pp
 
 BGR_BLUE = (255, 0, 0)
 BGR_GREEN = (0, 255, 0)
 
-PDF_BLUE = (0.0, 0.0, 1.0)
+PDF_RED = (1.0, 0.0, 0.0)
 PDF_GREEN = (0.0, 1.0, 0.0)
+PDF_BLUE = (0.0, 0.0, 1.0)
 
 DPI = 200
 TRIANGLE_MIN_AREA = DPI
@@ -163,6 +165,7 @@ class GuideMatrix:
         self.vertical_guides = v_guides
         self.vertical_guides.sort(key=lambda g: g.x)
         self.horizontal_guides = h_guides
+        self.horizontal_guides.sort(key=lambda g: g.y)
         self.tolerance = tolerance
 
     def cells_centers(self):
@@ -182,6 +185,15 @@ class GuideMatrix:
         vert_guide = self.vertical_guides[col]
         hor_guide = self.horizontal_guides[row]
         return (vert_guide.center_x, hor_guide.center_y)
+
+    def to_pdf_cords(self, transform: TransformationInfo):
+        pdf_guides = [g.to_pdf_cords(transform) for g in self.vertical_guides] + [
+            g.to_pdf_cords(transform) for g in self.horizontal_guides
+        ]
+        return GuideMatrix(pdf_guides)
+
+    def __repr__(self):
+        return f"GuideMatrix<{self.num_rows}x{self.num_cols}>(<{self.horizontal_guides}>x<{self.vertical_guides}>)"
 
 
 def show_image(img, convert_from_grayscale=False):
@@ -300,7 +312,7 @@ def detect_triangles(img, min_area=DPI + 50):
 
 def detect_bubbles(
     img,
-    min_area=50,
+    min_area=DPI,
     circularity_threshold=0.8,
     solidity_threshold=0.8,
 ):
@@ -376,12 +388,7 @@ def gather_into_columns(lst, demarkation_points, key=lambda x: x):
     return columns
 
 
-def get_matrices(guide_points, column_cutoffs):
-    columns = gather_into_columns(guide_points, column_cutoffs, key=lambda g: g.x)
-    return [GuideMatrix(c) for c in columns]
-
-
-def has_a_bubble_at(point, bubbles, tolerance=100):
+def has_a_bubble_at(point, bubbles, tolerance=30):
     for bubble in bubbles:
         if (
             abs(point[0] - bubble.x) < tolerance
@@ -396,9 +403,7 @@ def build_attempt_matrices(guide_matrices, bubble_columns):
         "Both guide matrices and answers must be the same size"
     )
     attempt_matrices = []
-    for col_idx in range(len(guide_matrices)):
-        guide_matrix = guide_matrices[col_idx]
-        bubbles = bubble_columns[col_idx]
+    for guide_matrix, bubbles in zip(guide_matrices, bubble_columns):
         num_rows = guide_matrix.num_rows
         num_cols = guide_matrix.num_cols
         attempt_matrix = [[0 for _ in range(num_cols)] for _ in range(num_rows)]
@@ -412,28 +417,38 @@ def build_attempt_matrices(guide_matrices, bubble_columns):
     return attempt_matrices
 
 
-def process_answers(img: cv.typing.MatLike, bubbles: list[Bubble], guide_points):
+def get_attempt_matrix_from_raw_objs(
+    img: cv.typing.MatLike, bubbles: list[Bubble], guide_points
+):
     column_cutoffs = [int(img.shape[1] / 2)]  # Only 2 columns for now
-    guide_matricies = get_matrices(guide_points, column_cutoffs)
-    print(guide_matricies[0].num_rows, guide_matricies[0].num_cols)
+    columns = gather_into_columns(guide_points, column_cutoffs, key=lambda g: g.x)
+    guide_matricies = [GuideMatrix(c) for c in columns]
     answers = gather_into_columns(bubbles, column_cutoffs, key=lambda b: b.x)
     attempt_matrices = build_attempt_matrices(guide_matricies, answers)
-    return attempt_matrices
+    return list(chain(*attempt_matrices)), guide_matricies
 
 
-def mark_single_page(page_image: cv.typing.MatLike):
+def draw_all_objects_on(to_draw_on, *objs_to_draw):
+    for obj in objs_to_draw:
+        obj.draw(to_draw_on)
+
+
+def get_attempts_on_page_img(page_image: cv.typing.MatLike):
     processed_image, transformation_data = fix_page_orientation(page_image)
     if transformation_data is None:
         # If orientation failed, we can't reliably detect anything.
-        return [], [], [], None
+        return [], [], [], [], None
 
     guides = detect_triangles(processed_image)
     bubbles = detect_bubbles(processed_image)
 
+    # draw_all_objects_on(processed_image, *guides, *bubbles)
     print(f"Num guides: {len(guides)}")
 
-    attempt_matrices = process_answers(processed_image, bubbles, guides)
-    return list(chain(*attempt_matrices)), guides, bubbles, transformation_data
+    attempt_matrix, guide_matrices = get_attempt_matrix_from_raw_objs(
+        processed_image, bubbles, guides
+    )
+    return attempt_matrix, guides, bubbles, guide_matrices, transformation_data
 
 
 def get_image_from_page(page):
@@ -449,60 +464,110 @@ def get_answers_from_file(document):
     all_answers = []
     for page in document.pages():
         page_image = get_image_from_page(page)
-        answers_on_this_page, _, _, _ = mark_single_page(page_image)
-        all_answers.extend(answers_on_this_page)
+        answers_on_this_page, *_ = get_attempts_on_page_img(page_image)
+        all_answers.append(answers_on_this_page)
     return all_answers
 
 
+def draw_correct_answers_on_page(guide_matrices, answers, radius, page):
+    guide_matrices = list(guide_matrices)
+    num_rows_in_matrix = guide_matrices[0].num_rows
+    rot_matrix = page.derotation_matrix
+    for row, answer in enumerate(answers):
+        guide_matrix = guide_matrices[row // num_rows_in_matrix]
+        for col, option in enumerate(answer):
+            if option != 1:
+                continue
+            center = pymupdf.Point(
+                guide_matrix.cell_center_at(row % num_rows_in_matrix, col)
+            )
+            center = center * rot_matrix
+            page.draw_circle(center, radius, color=PDF_GREEN)
+
+
 def draw_detected_objects_on_page(bubbles, guides, page):
+    rot_matrix = page.derotation_matrix
     for bubble in bubbles:
+        center = pymupdf.Point(bubble.x, bubble.y)
+        center = center * rot_matrix
         page.draw_circle(
-            (bubble.x, bubble.y),
+            center,
             bubble.radius,
-            color=PDF_GREEN,
+            color=PDF_RED,
         )
+
     for guide in guides:
-        page.draw_rect(
-            (guide.x, guide.y, guide.x + guide.width, guide.y + guide.height),
-            color=PDF_BLUE,
+        rect = pymupdf.Rect(
+            guide.x, guide.y, guide.x + guide.width, guide.y + guide.height
         )
+        rect = rect * rot_matrix
+        rect.normalize()
+        page.draw_rect(rect, color=PDF_BLUE)
+
+
+def calculate_final_score(attempt_matrix, answer_matrix):
+    assert len(attempt_matrix) == len(answer_matrix)
+    assert len(attempt_matrix[0]) == len(answer_matrix[0])
+
+    total_answers = 0
+    correct_answers = 0
+    for attempt, answer in zip(attempt_matrix, answer_matrix):
+        if not any(answer):
+            continue
+        total_answers += 1
+        if answer == attempt:
+            correct_answers += 1
+
+    return correct_answers, total_answers
 
 
 def mark_file(attempt_file_bytes, answer_file_bytes):
     attempt_file = pymupdf.Document(stream=attempt_file_bytes)
     answer_file = pymupdf.Document(stream=answer_file_bytes)
-    all_attempted_answers = []
+    answers = get_answers_from_file(answer_file)
+
+    all_attempts = []
     attempt_pages = list(attempt_file.pages())
-    for page in attempt_pages:
+    for page, correct_answers_on_this_page in zip(attempt_pages, answers):
         page_image = get_image_from_page(page)
-        answer_attempts_on_this_page, guides, bubbles, transform_data = (
-            mark_single_page(page_image)
+        attempts, guides, bubbles, guide_matrices, transform_data = (
+            get_attempts_on_page_img(page_image)
         )
-        all_attempted_answers.extend(answer_attempts_on_this_page)
+        assert transform_data is not None
+        all_attempts.extend(attempts)
 
         pdf_bubbles = [b.to_pdf_cords(transform_data) for b in bubbles]
         pdf_guides = [g.to_pdf_cords(transform_data) for g in guides]
+        pdf_guides_matrices = [gm.to_pdf_cords(transform_data) for gm in guide_matrices]
 
+        print("Page rotation: ", page.rotation)
         draw_detected_objects_on_page(pdf_bubbles, pdf_guides, page)
+        draw_correct_answers_on_page(
+            pdf_guides_matrices,
+            correct_answers_on_this_page,
+            pdf_bubbles[0].radius + 3,
+            page,
+        )
 
-    answers = get_answers_from_file(answer_file)
+    answers = list(chain(*answers))
     print("Answer:")
     for i, answer in enumerate(answers, start=1):
         print(f"{i:2}: {answer}")
 
     print("Attempt:")
-    for i, attempted_answer in enumerate(all_attempted_answers, start=1):
+    for i, attempted_answer in enumerate(all_attempts, start=1):
         print(f"{i:2}: {attempted_answer}")
 
-    final_score = sum(
-        question_attempt == answer
-        for (question_attempt, answer) in zip(all_attempted_answers, answers)
-    )
-    score_str = f"Score: {final_score}/{len(answers)}"
+    score, total_answers = calculate_final_score(all_attempts, answers)
+    score_str = f"Score: {score}/{total_answers}"
     print(score_str)
 
     first_page = attempt_pages[0]
-    first_page.insert_text((20, 20), score_str, fontsize=24)
+    score_loc = pymupdf.Point(20, 20)
+    score_loc = score_loc * first_page.derotation_matrix
+    first_page.insert_text(
+        score_loc, score_str, fontsize=24, rotate=first_page.rotation
+    )
 
     ret = attempt_file.tobytes()
     attempt_file.close()

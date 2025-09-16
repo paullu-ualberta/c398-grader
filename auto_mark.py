@@ -6,7 +6,7 @@ from concurrent.futures import ProcessPoolExecutor as Pool
 from functools import partial
 
 
-def read_mark_and_write(attempt_file_path, answer_file_path):
+def read_mark_and_write(answer_file_path, attempt_file_path):
     answer_file = Path(answer_file_path)
     with answer_file.open("rb") as answer_file:
         mark_and_write(answer_file.read(), attempt_file_path)
@@ -39,18 +39,14 @@ def main():
 
     args = parser.parse_args()
     if args.command == "mark":
-        read_mark_and_write(args.file, args.answer_file)
+        read_mark_and_write(args.answer_file, args.file)
     elif args.command == "mark-dir":
         dir = Path(args.dir).resolve()
         if not dir.is_dir():
             print(f"{dir} is not a directory")
             exit(1)
         pool = Pool(args.threads)
-        answer_file = Path(args.answer_file)
-        with answer_file.open("rb") as f:
-            answer_file_content = f.read()
-
-        marker = partial(mark_and_write, answer_file_content)
+        marker = partial(read_mark_and_write, args.answer_file)
         pool.map(marker, dir.glob("*.pdf"))
 
 
