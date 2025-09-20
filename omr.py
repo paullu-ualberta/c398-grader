@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from bisect import bisect_left
 import logging
 from itertools import chain
-from pprint import pprint as pp
 
 BGR_BLUE = (255, 0, 0)
 BGR_GREEN = (0, 255, 0)
@@ -18,6 +17,7 @@ PDF_BLUE = (0.0, 0.0, 1.0)
 DPI = 200
 TRIANGLE_MIN_AREA = DPI
 
+logger = logging.getLogger("OMR")
 
 @dataclass
 class TransformationInfo:
@@ -169,7 +169,7 @@ def detect_horizontal_and_vertical_guides(all_guides, tolerance=10):
 class GuideMatrix:
     def __init__(self, guide_points: list[GuideMark]):
         v_guides, h_guides = detect_horizontal_and_vertical_guides(guide_points)
-        print(f"Detected a grid {len(v_guides)}x{len(h_guides)} grid")
+        logger.debug(f"Detected a grid {len(v_guides)}x{len(h_guides)} grid")
         self.vertical_guides = v_guides
         self.vertical_guides.sort(key=lambda g: g.x)
         self.horizontal_guides = h_guides
@@ -258,7 +258,9 @@ def fix_page_orientation(page_img):
             )
 
     if not lines:
-        print("No dominant long lines were detected. Returning original image.")
+        logger.warning(
+            "No dominant long lines were detected. Returning original image."
+        )
         return page_img, None
 
     for line in lines:
@@ -266,7 +268,7 @@ def fix_page_orientation(page_img):
 
     angles = [line.angle for line in lines]
     median_angle = float(np.median(angles))
-    print(f"Median angle found as {median_angle}")
+    logger.debug(f"Rotating image by {-median_angle} degrees")
 
     center = (w // 2, h // 2)
     rotation_matrix = cv.getRotationMatrix2D(center, median_angle, 1.0)
@@ -280,7 +282,7 @@ def fix_page_orientation(page_img):
 
     top = min(lines, key=lambda l: l.start_y).start_y
     bottom = max(lines, key=lambda l: l.start_y).start_y
-    print(top, bottom)
+    logger.debug(f"Cropping image to height: {top}, {bottom}")
     cropped_image = rotated_image[top:bottom, :]
 
     transformation_data = TransformationInfo(
@@ -462,7 +464,7 @@ def get_attempts_on_page_img(page_image: cv.typing.MatLike):
 
     # draw_all_objects_on(processed_image, *guides, *bubbles)
     # show_image(processed_image)
-    print(f"Num guides: {len(guides)}")
+    logger.debug(f"Detected {len(guides)} guides")
 
     attempt_matrix, guide_matrices = get_attempt_matrix_from_raw_objs(
         processed_image, bubbles, guides
@@ -562,13 +564,10 @@ def calculate_final_score(attempt_matrix, answer_matrix):
 def mark_file(attempt_file_bytes, answer_file_bytes):
     attempt_file = pymupdf.Document(stream=attempt_file_bytes)
     answer_file = pymupdf.Document(stream=answer_file_bytes)
-    print("Process answer file")
-    print("-" * 80)
+    logger.debug("Start processing answer file")
     answers = get_answers_from_file(answer_file)
-    print("-" * 80)
 
-    print("Process attempt file")
-    print("-" * 80)
+    logger.debug("Start processing attempt file")
     all_attempts = []
     attempt_pages = list(attempt_file.pages())
     for page, correct_answers_on_this_page in zip(attempt_pages, answers):
@@ -583,7 +582,7 @@ def mark_file(attempt_file_bytes, answer_file_bytes):
         pdf_guides = [g.to_pdf_cords(transform_data) for g in guides]
         pdf_guide_matrices = [gm.to_pdf_cords(transform_data) for gm in guide_matrices]
 
-        print("Page rotation: ", page.rotation)
+        logger.debug(f"The PDF page is rotated: {page.rotation} degrees")
         draw_detected_objects_on_page(pdf_bubbles, pdf_guides, page)
         draw_correct_answers_on_page(
             pdf_guide_matrices,
@@ -597,17 +596,17 @@ def mark_file(attempt_file_bytes, answer_file_bytes):
         draw_question_status_on_page(pdf_guide_matrices, correct_positions, page)
 
     answers = list(chain(*answers))
-    print("Answer:")
+    logger.info("Found Answer Matrix as:")
     for i, answer in enumerate(answers, start=1):
-        print(f"{i:2}: {answer}")
+        logger.info(f" {i:2}: {answer}")
 
-    print("Attempt:")
+    logger.info("Attempt:")
     for i, attempted_answer in enumerate(all_attempts, start=1):
-        print(f"{i:2}: {attempted_answer}")
+        logger.info(f" {i:2}: {attempted_answer}")
 
     score, total_answers = calculate_final_score(all_attempts, answers)
     score_str = f"Score: {score}/{total_answers}"
-    print(score_str)
+    logger.info(f"Score: {score_str}")
 
     first_page = attempt_pages[0]
     score_loc = pymupdf.Point(20, 20)
@@ -615,8 +614,7 @@ def mark_file(attempt_file_bytes, answer_file_bytes):
     first_page.insert_text(
         score_loc, score_str, fontsize=24, rotate=first_page.rotation
     )
-    print("-" * 80)
 
     ret = attempt_file.tobytes()
     attempt_file.close()
-    return ret
+    return score, total_answers, ret
