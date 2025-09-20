@@ -1,4 +1,5 @@
 import json
+import csv
 from argparse import ArgumentParser
 from concurrent.futures import ProcessPoolExecutor as Pool
 from functools import partial
@@ -29,10 +30,15 @@ def mark_and_write_graded(answer_file_path, attempt_file_path, /, output_fname_p
     return score, total_score
 
 
-def write_to_json_out(scores_dict, json_file_name):
-    with open(json_file_name, "w+") as f:
-        logger.debug(f"Writing dict {scores_dict}")
-        json.dump(scores_dict, f, indent=4)
+def write_scores_to_outfile(scores_dict, outfile_name):
+    outfile = Path(outfile_name).resolve()
+    logger.debug(f"Writing dict {scores_dict}")
+    with outfile.open("w+") as f:
+        if outfile_name.endswith(".json"):
+            json.dump(scores_dict, f, indent=4)
+        else:
+            writer = csv.writer(f)
+            writer.writerows(scores_dict.items())
 
 
 def do_mark(args):
@@ -46,7 +52,7 @@ def do_mark(args):
     results_dict = dict(
         (str(f.name), score) for f, (score, _) in zip(files_to_mark, results)
     )
-    write_to_json_out(results_dict, args.out_file)
+    write_scores_to_outfile(results_dict, args.out_file)
 
 
 def main():
@@ -57,7 +63,7 @@ def main():
     mark_parser.add_argument("to_mark")
     mark_parser.add_argument("answer_file")
     mark_parser.add_argument("-j", "--threads", type=int, default=1)
-    mark_parser.add_argument("-o", "--output", dest="out_file", default="scores.json")
+    mark_parser.add_argument("-o", "--output", dest="out_file", default="scores.csv")
     mark_parser.add_argument(
         "-p", "--graded-file-name", default="graded_%F.pdf", dest="out_fname_pat"
     )
