@@ -1,53 +1,70 @@
-from omr import mark_file
-from pathlib import Path
-
+import json
 from argparse import ArgumentParser
 from concurrent.futures import ProcessPoolExecutor as Pool
 from functools import partial
+import logging
+
+from omr import mark_file
+from pathlib import Path
 
 
-def read_mark_and_write(answer_file_path, attempt_file_path):
+logger = logging.getLogger("CLI")
+logger.setLevel(logging.INFO)
+
+
+def mark_and_write_graded(answer_file_path, attempt_file_path, /, output_fname_pattern):
     answer_file = Path(answer_file_path)
-    with answer_file.open("rb") as answer_file:
-        mark_and_write(answer_file.read(), attempt_file_path)
+    with (
+        answer_file.open("rb") as answer_file,
+        attempt_file_path.open("rb") as attempt_file,
+    ):
+        score, total_score, marked_file_content = mark_file(
+            attempt_file.read(), answer_file.read()
+        )
+
+    output_fname = output_fname_pattern.replace("%F", attempt_file_path.name)
+    output_file = attempt_file_path.parent / output_fname
+    with output_file.open("wb+") as f:
+        f.write(marked_file_content)
+    return score, total_score
 
 
-def mark_and_write(answer_file_content, attempt_file_path):
-    print(f"Marking {attempt_file_path}")
-    attempt_file = Path(attempt_file_path)
-    with attempt_file.open("rb") as f:
-        marked_file = mark_file(f.read(), answer_file_content)
-    out_file = Path(attempt_file_path) / ".." / f"graded_{attempt_file.name}"
-    out_file = out_file.resolve()
-    print(f"Writing to {out_file}")
-    with out_file.open("wb+") as f:
-        f.write(marked_file)
+def write_to_json_out(scores_dict, json_file_name):
+    with open(json_file_name, "w+") as f:
+        logger.debug(f"Writing dict {scores_dict}")
+        json.dump(scores_dict, f, indent=4)
+
+
+def do_mark(args):
+    to_mark = Path(args.to_mark).resolve()
+    files_to_mark = list(to_mark.glob("*.pdf")) if to_mark.is_dir() else (to_mark,)
+    pool = Pool(args.threads)
+    marker = partial(
+        mark_and_write_graded, args.answer_file, output_fname_pattern=args.out_fname_pat
+    )
+    results = pool.map(marker, files_to_mark)
+    results_dict = dict(
+        (str(f.name), score) for f, (score, _) in zip(files_to_mark, results)
+    )
+    write_to_json_out(results_dict, args.out_file)
 
 
 def main():
     parser = ArgumentParser()
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
     mark_parser = subparsers.add_parser("mark")
-    mark_parser.add_argument("file")
+    mark_parser.add_argument("to_mark")
     mark_parser.add_argument("answer_file")
-
-    mark_dir_parser = subparsers.add_parser("mark-dir")
-    mark_dir_parser.add_argument("dir")
-    mark_dir_parser.add_argument("answer_file")
-    mark_dir_parser.add_argument("-j", "--threads", type=int, default=1)
+    mark_parser.add_argument("-j", "--threads", type=int, default=1)
+    mark_parser.add_argument("-o", "--output", dest="out_file", default="scores.json")
+    mark_parser.add_argument(
+        "-p", "--graded-file-name", default="graded_%F.pdf", dest="out_fname_pat"
+    )
 
     args = parser.parse_args()
     if args.command == "mark":
-        read_mark_and_write(args.answer_file, args.file)
-    elif args.command == "mark-dir":
-        dir = Path(args.dir).resolve()
-        if not dir.is_dir():
-            print(f"{dir} is not a directory")
-            exit(1)
-        pool = Pool(args.threads)
-        marker = partial(read_mark_and_write, args.answer_file)
-        pool.map(marker, dir.glob("*.pdf"))
+        do_mark(args)
 
 
 if __name__ == "__main__":
