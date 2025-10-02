@@ -15,13 +15,11 @@ logger.setLevel(logging.INFO)
 
 def mark_and_write_graded(answer_file_path, attempt_file_path, /, output_fname_pattern):
     answer_file = Path(answer_file_path)
-    with (
-        answer_file.open("rb") as answer_file,
-        attempt_file_path.open("rb") as attempt_file,
-    ):
-        score, total_score, marked_file_content = mark_file(
-            attempt_file.read(), answer_file.read()
-        )
+    with answer_file.open("rb") as answer_file:
+        with attempt_file_path.open("rb") as attempt_file:
+            score, total_score, marked_file_content = mark_file(
+                attempt_file.read(), answer_file.read()
+            )
 
     output_fname = output_fname_pattern.replace("%F", attempt_file_path.name)
     output_file = attempt_file_path.parent / output_fname

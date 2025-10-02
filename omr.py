@@ -22,7 +22,7 @@ logger = logging.getLogger("OMR")
 @dataclass
 class TransformationInfo:
     angle: float
-    center: tuple[int, int]
+    center: tuple
     crop_top: int
 
     def translate_cords_back(self, x, y):
@@ -167,7 +167,7 @@ def detect_horizontal_and_vertical_guides(all_guides, tolerance=10):
 
 
 class GuideMatrix:
-    def __init__(self, guide_points: list[GuideMark]):
+    def __init__(self, guide_points: list):
         v_guides, h_guides = detect_horizontal_and_vertical_guides(guide_points)
         logger.debug(f"Detected a grid {len(v_guides)}x{len(h_guides)} grid")
         self.vertical_guides = v_guides
@@ -438,7 +438,7 @@ def build_attempt_matrices(guide_matrices, bubble_columns):
 
 
 def get_attempt_matrix_from_raw_objs(
-    img: cv.typing.MatLike, bubbles: list[Bubble], guide_points
+    img: cv.typing.MatLike, bubbles: list, guide_points
 ):
     column_cutoffs = [int(img.shape[1] / 2)]  # Only 2 columns for now
     columns = gather_into_columns(guide_points, column_cutoffs, key=lambda g: g.x)

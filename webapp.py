@@ -19,7 +19,7 @@ def handle_pdf_processing(answer_key, pdfs_to_grade):
 
     for i, uploaded_file in enumerate(pdfs_to_grade, start=1):
         status_text.text(f"Grading {uploaded_file.name}...")
-        marked_pdf_file = mark_file(uploaded_file.read(), answer_key.read())
+        _, _, marked_pdf_file = mark_file(uploaded_file.read(), answer_key.read())
         marked_file_name = f"Graded_{uploaded_file.name}"
         marked_files.append({"name": marked_file_name, "data": marked_pdf_file})
 

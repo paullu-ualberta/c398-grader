@@ -1,12 +1,12 @@
-acres==0.5.0
-altair==5.5.0
+acres==0.2.0
+altair==5.4.1
 attrs==25.3.0
-blinker==1.9.0
-cachetools==6.2.0
+blinker==1.8.2
+cachetools==5.5.2
 certifi==2025.8.3
 charset-normalizer==3.4.3
 ci-info==0.3.0
-click==8.2.1
+click==8.1.8
 configobj==5.0.9
 configparser==7.2.0
 etelemetry==0.3.1
