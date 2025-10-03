@@ -1,5 +1,5 @@
 import streamlit as st
-from omr import mark_file
+from omr import mark_file, mark_single_file
 
 st.set_page_config(
     page_title="Exam Grader",
@@ -11,21 +11,29 @@ if "processed_files" not in st.session_state:
     st.session_state.processed_files = []
 
 
-def handle_pdf_processing(answer_key, pdfs_to_grade):
+def handle_pdf_processing(answer_key, pdfs_to_grade, mode):
     marked_files = []
 
     progress_bar = st.progress(0, "Starting grading...")
     status_text = st.empty()
 
-    for i, uploaded_file in enumerate(pdfs_to_grade, start=1):
+    if  mode == "Single File Mode":
+        uploaded_file = pdfs_to_grade
         status_text.text(f"Grading {uploaded_file.name}...")
-        _, _, marked_pdf_file = mark_file(uploaded_file.read(), answer_key.read())
+        marked_pdf_file = mark_single_file(uploaded_file.read(), answer_key.read())
         marked_file_name = f"Graded_{uploaded_file.name}"
         marked_files.append({"name": marked_file_name, "data": marked_pdf_file})
+        progress_bar.progress(1, f"Graded 1 of 1 exams.")
+    else:
+        for i, uploaded_file in enumerate(pdfs_to_grade, start=1):
+            status_text.text(f"Grading {uploaded_file.name}...")
+            _, _, marked_pdf_file = mark_file(uploaded_file.read(), answer_key.read())
+            marked_file_name = f"Graded_{uploaded_file.name}"
+            marked_files.append({"name": marked_file_name, "data": marked_pdf_file})
 
-        # Update progress bar
-        progress = i / len(pdfs_to_grade)
-        progress_bar.progress(progress, f"Graded {i} of {len(pdfs_to_grade)} exams.")
+            # Update progress bar
+            progress = i / len(pdfs_to_grade)
+            progress_bar.progress(progress, f"Graded {i} of {len(pdfs_to_grade)} exams.")
 
     status_text.text("Grading complete!")
     status_text.empty()
@@ -52,21 +60,39 @@ with st.container(border=True):
         help="Please upload the answer key for the exam.",
     )
 
-    pdfs_to_grade = st.file_uploader(
-        "Upload the exams to be graded",
-        type="pdf",
-        accept_multiple_files=True,
-        help="You can upload one or more exams to be graded here.",
+    mode = st.radio(
+        "Select grading mode",
+        ("Single File Mode", "Multi File Mode"),
+        index=1,
+        help="Choose 'Multi File Mode' to grade multiple exams at once or 'Single File Mode' to grade a single exam."
     )
+
+    if mode == "Multi File Mode":
+        pdfs_to_grade = st.file_uploader(
+            "Upload the exams to be graded",
+            type="pdf",
+            accept_multiple_files=True,
+            help="You can upload one or more exams to be graded here.",
+        )
+    else:
+        pdfs_to_grade = st.file_uploader(
+            "Upload the exam to be graded",
+            type="pdf",
+            accept_multiple_files=False,
+            help="Upload a the exams combined into a single pdf to be graded.",
+        )
 
 with st.container(border=True):
     st.subheader("Step 2: Grade Exams")
 
-    is_ready_to_process = answer_key is not None and len(pdfs_to_grade) > 0
+    if mode == "Single File Mode":
+        is_ready_to_process = answer_key is not None and pdfs_to_grade is not None
+    else:
+        is_ready_to_process = answer_key is not None and len(pdfs_to_grade) > 0
 
     if st.button("Grade Exams", type="primary", disabled=not is_ready_to_process):
         with st.spinner("Preparing to grade your exams..."):
-            processed_results = handle_pdf_processing(answer_key, pdfs_to_grade)
+            processed_results = handle_pdf_processing(answer_key, pdfs_to_grade, mode)
             st.session_state.processed_files = processed_results
             st.success("Exams have been graded successfully!")
 
