@@ -6,7 +6,7 @@ Original implementation by DhanrajHira.
 
 ## Running under multipass, Ubuntu 24.04 LTS
 
-1.  Install some Ubuntu packages
+1.  Install some Ubuntu packages (TO DO: Simplify?  Clean-up?)
 
     ```bash
     sudo apt update
