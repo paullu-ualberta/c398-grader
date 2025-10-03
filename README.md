@@ -11,9 +11,9 @@ Original implementation by DhanrajHira.
     ```bash
     sudo apt update
     sudo apt install python3.12-venv
-    sudo apt-get install build-essential gcc make
+    sudo apt install build-essential gcc make
     sudo apt install python3 python3-pip
-    sudo apt-get install libgl-dev
+    sudo apt install libgl-dev
     ```
 
 ## Running the application
@@ -33,8 +33,6 @@ Original implementation by DhanrajHira.
 3.  **Install the dependencies:**
 
     ```bash
-    pip install setuptools
-    pip install opencv-python
     pip install -r requirements.txt
     ```
 
