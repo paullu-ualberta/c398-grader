@@ -19,6 +19,7 @@ TRIANGLE_MIN_AREA = DPI
 
 logger = logging.getLogger("OMR")
 
+
 @dataclass
 class TransformationInfo:
     angle: float
@@ -561,15 +562,8 @@ def calculate_final_score(attempt_matrix, answer_matrix):
     return sum(positions), len(positions)
 
 
-def mark_file(attempt_file_bytes, answer_file_bytes):
-    attempt_file = pymupdf.Document(stream=attempt_file_bytes)
-    answer_file = pymupdf.Document(stream=answer_file_bytes)
-    logger.debug("Start processing answer file")
-    answers = get_answers_from_file(answer_file)
-
-    logger.debug("Start processing attempt file")
+def mark_pages(attempt_pages, answers):
     all_attempts = []
-    attempt_pages = list(attempt_file.pages())
     for page, correct_answers_on_this_page in zip(attempt_pages, answers):
         page_image = get_image_from_page(page)
         attempts, guides, bubbles, guide_matrices, transform_data = (
@@ -614,7 +608,39 @@ def mark_file(attempt_file_bytes, answer_file_bytes):
     first_page.insert_text(
         score_loc, score_str, fontsize=24, rotate=first_page.rotation
     )
+    return score, total_answers
 
+
+def chunked(iterable, n):
+    args = [iter(iterable)] * n
+    return zip(*args)
+
+
+def mark_single_file(attempt_file_bytes, answer_file_bytes):
+    attempt_file = pymupdf.Document(stream=attempt_file_bytes)
+    answer_file = pymupdf.Document(stream=answer_file_bytes)
+    logger.debug("Start processing answer file")
+    answers = get_answers_from_file(answer_file)
+    attempt_pages = list(attempt_file.pages())
+    assert len(attempt_pages) % len(answers) == 0, (
+        "Not all attempts seem to have all pages"
+    )
+    attempts = chunked(attempt_pages, len(answers))
+    for attempt in attempts:
+        mark_pages(attempt, answers)
+    ret = attempt_file.tobytes()
+    attempt_file.close()
+    return ret
+
+
+def mark_file(attempt_file_bytes, answer_file_bytes):
+    attempt_file = pymupdf.Document(stream=attempt_file_bytes)
+    answer_file = pymupdf.Document(stream=answer_file_bytes)
+    logger.debug("Start processing answer file")
+    answers = get_answers_from_file(answer_file)
+    logger.debug("Start processing attempt file")
+    attempt_pages = list(attempt_file.pages())
+    score, total_answers = mark_pages(attempt_pages, answers)
     ret = attempt_file.tobytes()
     attempt_file.close()
     return score, total_answers, ret
