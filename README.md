@@ -2,6 +2,8 @@
 
 This application automatically grades exams based on a provided answer key.
 
+Original implementation by DhanrajHira.
+
 ## Running the application
 
 1.  **Create a virtual environment:**
